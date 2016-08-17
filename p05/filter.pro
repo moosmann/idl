@@ -29,7 +29,7 @@ function filter_pixel, img, kernel_width=kernel_width
 end
 
 
-function pad_image, im, width, method, value=value, type_code=type_code
+function pad_image, im, width=width, method=method, value=value, type_code=type_code
 
   ; Pad input image 'im' 
   ; WIDTH: 
@@ -43,10 +43,15 @@ function pad_image, im, width, method, value=value, type_code=type_code
   ;   'edge': replicate value on edges.
   ; VALUE: value used for constant padding. If undefined VALUE defaults to zero.
   
+  ; Default arguments
+  if n_elements(width) eq 0 then return, im
+  if max(width) eq 0 then return, im
+  if n_elements(method) eq 0 then method = 'constant'
+  if n_elements(type_code) eq 0 then type_code = size(im, /type)
+
+  ; Parameters
   im_size = size(im, /dimensions)
   im_ndim = size(im, /n_dimensions)
-  if n_elements(type_code) eq 0 then type_code = size(im, /type)
-  
   case n_elements(width) of
     1: begin
       w0_before = width
@@ -66,71 +71,76 @@ function pad_image, im, width, method, value=value, type_code=type_code
       w1_before = width[2]
       w1_after = width[3]      
       end
-  else: message, 'Number of elements of WIDTH not in 1, 2, or 4.'
+  else: message, 'Number of elements of WIDTH is not 1, 2, or 4.'
   endcase
   
   ; padded dimensions
   pad_size = im_size + [w0_before + w0_after, w1_before + w1_after]
   
+  ; Padding
+  case method of
+    
+    'constant': begin
+      
+      ; If empty VALUE defaults to 0
+      if n_elements(value) eq 0 then value = 0  
+      
+      ; Create constant image
+      type_code = max([size(value, /type), type_code])
+      im_pad = make_array(pad_size, value=value, type=type_code)
+      
+      ; Fill interior with input image
+      im_pad[w0_before:-w0_after - 1, w1_before:-w1_after - 1] = im
+      
+      end
   
-  if method eq 'constant' then begin
-    
-    ; If empty VALUE defaults to 0
-    if n_elements(value) eq 0 then value = 0  
-    
-    ; Create constant image
-    type_code = max([size(value, /type), type_code])
-    im_pad = make_array(pad_size, value=value, type=type_code)
-    
-    ; Fill interior with input image
-    im_pad[w0_before:-w0_after - 1, w1_before:-w1_after - 1] = im
-    
-  endif
   
-  
-  if method eq 'symmetric' then begin
+    'symmetric' : begin
     
-    
-    if (max([w0_before, w0_after]) ge im_size[0]) or (max([w1_before, w1_after]) ge im_size[1]) then begin
-      message, 'Width of padded area greather than input image.'
-    endif
-    
-    ; Create zero image
-    im_pad = make_array(pad_size, type=type_code)
-    
-    ; 1st dimension before, interior, after
-    im_pad[*, w1_before:-w1_after - 1] = [im[w0_before:1:-1, *], im[*, *], im[-2:-w0_after - 1:-1, *]]
-    
-    ; 2nd dimension before
-    im_pad[*, 0:w1_before - 1] = im_pad[*, 2 * w1_before:w1_before + 1:-1]
-    ; 2nd dimension after
-    im_pad[*, -w1_after:-1] = im_pad[*, -w1_after - 2 :-2 * w1_after - 1:-1]
+      ; Check for each dimension if width of area which is padded is not larger than the actual image
+      if (max([w0_before, w0_after]) ge im_size[0]) or (max([w1_before, w1_after]) ge im_size[1]) then begin
+        message, 'Width of padded area larger than input image.'
+      endif
+      
+      ; Create zero image
+      im_pad = make_array(pad_size, type=type_code)
+      
+      ; 1st dimension before, interior, after
+      im_pad[*, w1_before:-w1_after - 1] = [im[w0_before:1:-1, *], im[*, *], im[-2:-w0_after - 1:-1, *]]
+      
+      ; 2nd dimension before
+      im_pad[*, 0:w1_before - 1] = im_pad[*, 2 * w1_before:w1_before + 1:-1]
+      
+      ; 2nd dimension after
+      im_pad[*, -w1_after:-1] = im_pad[*, -w1_after - 2 :-2 * w1_after - 1:-1]
      
-  endif
+      end
   
 
-  if method eq 'edge' then begin
-    
-    ; Create zero image
-    im_pad = make_array(pad_size, type=type_code)
-
-    ; Fill interior with input image
-    im_pad[w0_before:-w0_after - 1, w1_before:-w1_after - 1] = im
-    
-    ; 1st dimension before
-    im_pad[0:w0_before - 1, w1_before:-w1_after - 1] = make_array(w0_before, value=1) # im[0, *]
-    
-    ; 1st dimension after
-    im_pad[-w0_after:-1, w1_before:-w1_after - 1] = make_array(w0_after, value=1) # im[-1, *]
-    
-    ; 2nd dimension before
-    im_pad[*, 0:w1_before - 1] = im_pad[*, w1_before] # make_array(w1_before, value=1)
-    
-    ; 2nd dimension after
-    im_pad[*, -w1_after:-1] = im_pad[*, -w1_after - 1] # make_array(w1_after, value=1)
-
-  endif
+    'edge' : begin
   
+      ; Image of zeros
+      im_pad = make_array(pad_size, type=type_code)
+  
+      ; Fill interior with input image
+      im_pad[w0_before:-w0_after - 1, w1_before:-w1_after - 1] = im
+      
+      ; 1st dimension before
+      im_pad[0:w0_before - 1, w1_before:-w1_after - 1] = make_array(w0_before, value=1) # im[0, *]
+      
+      ; 1st dimension after
+      im_pad[-w0_after:-1, w1_before:-w1_after - 1] = make_array(w0_after, value=1) # im[-1, *]
+      
+      ; 2nd dimension before
+      im_pad[*, 0:w1_before - 1] = im_pad[*, w1_before] # make_array(w1_before, value=1)
+      
+      ; 2nd dimension after
+      im_pad[*, -w1_after:-1] = im_pad[*, -w1_after - 1] # make_array(w1_after, value=1)
+
+      end
+  
+  endcase
+
   return, im_pad
   
 end
