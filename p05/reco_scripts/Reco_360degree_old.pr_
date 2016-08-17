@@ -1,0 +1,275 @@
+pro Sinograms360degree_Combine, overlap = overlap
+    if n_elements(overlap) eq 0 then _overlap = -1   else _overlap = overlap
+
+    if _overlap ne -1 then recon_abs_set, 'uelapp', _overlap, /overwrite
+
+    if _overlap eq -1 then begin
+        Sinograms360degree_PrepareDataOverlap, 1500;50 quatsch
+        overlap=872;Sinograms360degree_TestOverlap(0)
+        PRINT, 'Test of overlap: ', overlap
+        overlap1=Sinograms360degree_FindOverlap(overlap/3,overlap,3,90)
+        overlap2=Sinograms360degree_FindOverlap(overlap/3,overlap,-3,90)
+        if overlap1 eq overlap2 then _overlap=overlap1 else begin
+          print, string(10b)+string(10b)+'Warning! Overlap calculation ambiguous. Found values'
+          print, 'Overlap 1 = ', overlap1
+          print, 'Overlap 2 = ', overlap2
+          print, string(10b)
+          stop
+        endelse
+        PRINT, 'Overlap: ', _overlap
+        recon_abs_set, 'uelapp', _overlap, /overwrite
+    endif ;_overlap eq -1
+
+    _same = 30
+    _rand = 10
+    if (2* _rand + 2*_same) gt _overlap then begin
+        _same = round(0.3 * _overlap)
+        _rand = round(0.1 * _overlap)
+      
+    endif ; (2* _rand + 2*_same) > _overlap 
+
+    recon_abs_set, 'smbereich', _same;, /overwrite
+    recon_abs_set, 'rand', _rand;, /overwrite
+    Sinograms360degree_CombineSinos
+end ;Sinograms360degree_Combine
+
+
+PRO Sinograms360degree_PrepareDataOverlap ,breite,left=st_left,right=st_right,mode=mode
+  ;+
+  ; LIEST DATEN EIN F�R findueberlapp.pro
+  ; mode = 0 ; normaler 360� scan
+  ; mode = 1 ; links 360� aussen, rechts 360� innen
+  ; mode = 2 ; links 360� aussen, rechts 180� innen
+  ; mode = 3 ; links 180� aussen, rechts 360� innen
+  ;-
+  
+  COMMON ueberlappvollsino_common, stl, str, na, n, br, wanz, sxsize, co
+  
+  if n_elements(mode) eq 0 then mode = 0
+  
+  if mode eq 0 then begin
+    recopfad=recon_abs_query('recopfad')
+    scanname=recon_abs_query('scanname')
+    
+    na=recopfad + '/sino/' + scanname
+    br=breite
+    n=FINDFILE(na + '*.si_', co=co)
+    IF co EQ 0 THEN BEGIN
+      print,'Kein File vorhanden!'
+      print,'Suche: ',na+'*.si_'
+      RETURN
+    ENDIF
+    s=read_dat(n(0),/sil)
+    ;stop
+    si=SIZE(s)
+    wanz=si(2)
+    sxsize=si(1)
+    
+    start=co/2-50
+    co=100
+    stl=FLTARR(br,wanz/2,co)
+    str=FLTARR(br,wanz/2,co)
+    
+    print, 'Lese ',STRTRIM(co,2),' Sinogramme (xs=',STRTRIM(sxsize,2) $
+      , ',wanz=',STRTRIM(wanz,2),') ',na
+    PRINT, co*wanz*breite, ' FLOAT will be read into memory.'
+    FOR i=0,co-1 DO BEGIN
+      IF i MOD 100 EQ 0 THEN BEGIN
+        print, i
+        WAIT,.1
+      ENDIF
+      s=read_dat(n(i+start),/sil)
+      stl(*,*,i)=s(sxsize-breite:sxsize-1,0:wanz/2 - 1)
+      ;     str(*,*,i)=ROTATE(s(sxsize-breite:sxsize-1,wanz/2:wanz-1),5)
+      str(*,*,i)=ROTATE(s(sxsize-breite:sxsize-1, wanz/2:wanz/2 + wanz/2 - 1), 5)  ; TD 7.6.2006 software aborted because the array was too big.
+    ENDFOR
+  endif else if mode eq 1 then begin
+  
+  
+    stl=st_left
+    str=st_right
+    si=SIZE(stl)
+    wanz=si(2)*2
+    sxsize=si(1)
+    br=si(3)
+    co=br
+    
+    print,'wanz=',wanz
+    print,'sxsize=',sxsize
+    print,'breite max =',br
+  endif
+END ;Sinograms360degree_PrepareDataOverlap
+
+
+
+FUNCTION Sinograms360degree_FindOverlap, breite, start, increment, ybr
+  ;+
+  ;-
+  
+  COMMON ueberlappvollsino_common,stl,str,na,n,br,wanz,sxsize,co
+  IF N_PARAMS(0) lt 4 THEN BEGIN
+    print,'result = findueberlapp(breite,start,increment,ybr)'
+    IF N_ELEMENTS(na) EQ 0 THEN BEGIN
+      print,' zun�chst common-block durch ueberlappvollsino initialisieren'
+      RETURN,-1
+    ENDIF
+    print,'         result = gefundenener Ueberlapp in Pixel
+    print,'         breite =  Breite des verwendeten Ueberlappbereiches'
+    print,'         start = Anfangsvermutung des Ueberlapps in Pixel'
+    print,'         increment = Schrittweite der Aenderung des Ueberlapps'
+    print,'         ybr = Anzahl der verwendeten mittlerenSchichten '
+    print,'Zur Zeit geladen:'
+    print,'      common ueberlappvollsino_common,stl,str,na,n,br,wanz,sxsize,co'
+    print,'      na    = '',na,'''
+    print,'      br      = ',STRTRIM(br,2)
+    print,'      wanz    = ',STRTRIM(wanz,2)
+    print,'      sxsize  = ',STRTRIM(sxsize,2)
+    print,'      co      = ',STRTRIM(co,2)
+    RETURN,-1
+  ENDIF
+  
+  ; ITERATIVE SEARCH FOR BEST VALUE OF start
+  f1=Sinograms360degree_Overlap(breite,start,ybr)
+  REPEAT BEGIN
+    salt=start
+    start=start+increment
+    f2=Sinograms360degree_Overlap(breite,start,ybr)
+    IF f1 lt f2 THEN increment=-increment/2
+    f1=f2
+  ENDREP UNTIL increment EQ 0
+  RETURN,salt
+END ;Sinograms360degree_FindOverlap
+
+
+FUNCTION Sinograms360degree_Overlap, breite, start, ybr, debug=deb
+  
+  COMMON ueberlappvollsino_common, stl, str, na, n, br, wanz, sxsize, co
+  
+  xs=br
+  ys=wanz
+  
+  z0=co/2-ybr/2
+  z1=co/2+ybr/2
+  IF z0 lt 0 THEN z0=0
+  IF z1 GE co THEN z1=co-1
+  IF z0 GE z1 THEN BEGIN
+    z0=0
+    z1=co-1
+  ENDIF
+  
+  sta=(start-breite)/2
+  
+  xanf1=xs-start+sta
+  xanf2=0+sta
+  
+  IF KEYWORD_SET(deb) THEN $
+    print,' x1,x2=[',STRTRIM(xanf1,2),',',STRTRIM(xanf2,2),']  breite='$
+    ,STRTRIM(breite,2)
+    
+  di=stl(xanf1:xanf1+breite-2,0:ys/2-1,z0:z1)$
+    -str(xanf2:xanf2+breite-1,0:ys/2-1,z0:z1)
+    
+  RETURN, TOTAL(di*di)/N_ELEMENTS(di)
+END ;Sinograms360degree_Overlap
+
+
+PRO Sinograms360degree_CombineSinos, ERASE=ERASE
+  ;+
+  ; Convert a 360deg scan into 180 degree data by combination of mirror images
+  ; Will bin the sinogram to sinobin
+  ;-
+  
+  IF N_ELEMENTS(ERASE) EQ 0 THEN ERASE=0
+  
+  uelapp=FIX(recon_abs_query('uelapp'))
+  smbereich=FIX(recon_abs_query('smbereich'))
+  rand=FIX(recon_abs_query('rand'))
+  
+  recopfad=recon_abs_query('recopfad')
+  sinobin=recon_abs_query('sinobin')
+  scanname=recon_abs_query('scanname')
+  stepwinkel=FIX(recon_abs_query('stepwinkel'))
+  ;   xmin=FIX(recon_abs_query('xmin'))
+  ;   xmax=FIX(recon_abs_query('xmax'))
+  ;   xanz=xmax-xmin+1
+  
+  search_path = recopfad+'/sino/'+scanname+'*.si_'
+  n=FINDFILE(search_path,co=co)
+  
+  IF (co EQ 0) THEN BEGIN
+    PRINT, 'No .si_ files found in: ' + search_path
+    RETURN
+  ENDIF ELSE BEGIN
+    PRINT, STRING(co) + ' si_ files found in: ' + search_path
+  ENDELSE
+  
+  ;Detect the xsize from the first singoram. ;TD 13.6.2006
+  s=SIZE(read_dat(n(0)))
+  xanz=s(1)
+ 
+  ys=36000/stepwinkel
+  xsl=xanz
+  ysl=ys/2
+  xsr=xanz
+  ysr=ys/2
+  
+  xs_si=fix((xsl+xsr-uelapp)/sinobin)
+  zs_si=fix(co/sinobin)
+  sinost=fltarr(xs_si*sinobin,ys/2,sinobin)
+  
+  FOR i=0, co-1 DO BEGIN
+    old_file=n(i)
+    nneu=BYTE(old_file)
+    nneu[STRLEN(nneu)-1]=BYTE('n')
+    new_file=STRING(nneu)
+    
+    ndum=FINDFILE(new_file, co=codum)
+    
+    IF codum(0) NE 1 THEN BEGIN
+      s=read_dat(n(i), /sil)
+      sl=s(*, 0:ys/2-1)
+      sr=ROTATE(s(*,ys/2:ys-1),5)
+      
+      sneu=FLTARR(xsl+xsr-uelapp,ysl)
+      
+      sneu[0:xsl-1-uelapp+rand,*]=sl[0:xsl-1-uelapp+rand,*]
+      sneu[xsl-rand:xsl+xsr-uelapp-1,*]=sr[uelapp-rand:xsr-1,*]
+      
+      w=INDGEN(smbereich)/FLOAT(smbereich-1)*.5
+      w=REBIN(w,smbereich, ysl)
+  
+      sneu[xsl-uelapp+rand:xsl-uelapp+rand+smbereich-1, *]=sl[xsl+rand-uelapp:xsl+rand-uelapp+smbereich-1, *]*(1-w)+sr[rand:rand+smbereich-1, *]*w
+      sneu[xsl-uelapp+rand+smbereich:xsl-rand-1-smbereich, *]=sl[xsl+rand-uelapp+smbereich:xsl-1-rand-smbereich,*]*.5+sr[rand+smbereich:uelapp-1-rand-smbereich, *]*.5
+      sneu[xsl-rand-smbereich:xsl-1-rand, *]=sl[xsl-rand-smbereich:xsl-1-rand, *]*(0.5-w)+sr[uelapp-rand-smbereich:uelapp-1-rand,*]*(0.5+w)
+
+      sinost[*,*,i mod sinobin]=sneu[0:xs_si*sinobin-1,*]
+      if (i mod sinobin) eq sinobin-1 then begin
+        write_dat, rebin(sinost,xs_si,ysl,1), recopfad+'/sino/'+scanname+numstr(i/sinobin),'sin', /sil
+      endif
+      IF (ERASE EQ 1) THEN SPAWN, 'rm '+old_file
+    ENDIF ELSE PRINT, new_file, ' DOES EXIST. NOT REPLACED.'
+  ENDFOR
+  
+  ;Setze neue Parameter fuer die ver�nderte Sinogramm-Gr��e (�berschreiben der alten Werte)
+  recon_abs_set, 'xmin_sin', 0, /overwrite
+  recon_abs_set, 'xmax_sin', xs_si-1, /overwrite
+  recon_abs_set, 'ymin_sin', 0, /overwrite
+  recon_abs_set, 'ymax_sin', (co/sinobin)-1, /overwrite
+  
+  PRINT, 'sinocombine.pro HAS FINISHED'
+END ;Sinograms360degree_CombineSinos
+
+
+FUNCTION Sinograms360degree_TestOverlap,dummy
+  COMMON ueberlappvollsino_common, stl, str, na, n, br, wanz, sxsize, co
+  tl=total(total(stl,3),2)
+  tr=total(total(str,3),2)
+  totav=fltarr(br)
+  for i=1,br-1 do totav[i]=total(abs(tl[br-i:br-1]-tr[0:i-1]))/i
+  
+  w=where(totav eq min(totav[1:br-1]))
+  
+  plot,totav
+  print,'Best overlapp at :',w[0]
+  return, w[0]
+end ;Sinograms360degree_TestOverlap
